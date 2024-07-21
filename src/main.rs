@@ -21,7 +21,7 @@ async fn main() {
 
     let state = State {
         pdf_path: PathBuf::from("uploads"),
-        admin_group: env!("ADMIN_GROUP_ID").to_string(),
+        admin_group: std::env::var("ADMIN_GROUP_ID").expect("ADMIN_GROUP_ID env var is required"),
     };
 
     fs::create_dir_all(&state.pdf_path).await.unwrap();
