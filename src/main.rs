@@ -1,6 +1,6 @@
 use log::*;
-use std::ffi::{OsString};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::process::Output;
 use teloxide::net::Download;
 use teloxide::prelude::*;
 use teloxide::types::{MediaKind, MessageCommon, MessageKind};
@@ -9,6 +9,7 @@ use tokio::fs;
 #[derive(Clone, Debug)]
 struct State {
     pub pdf_path: PathBuf,
+    pub admin_group: String,
 }
 
 #[tokio::main]
@@ -16,36 +17,48 @@ async fn main() {
     pretty_env_logger::init();
     log::info!("Starting throw dice bot...");
 
-    let state = State {
-        pdf_path: PathBuf::from("uploads"),
-    };
-
     let bot = Bot::from_env();
 
+    let state = State {
+        pdf_path: PathBuf::from("uploads"),
+        admin_group: env!("ADMIN_GROUP_ID").to_string(),
+    };
+
+    fs::create_dir_all(&state.pdf_path).await.unwrap();
+
     teloxide::repl(bot, move |bot: Bot, msg: Message| {
-        let state = state.clone();
+        let state2 = state.clone();
 
         async move {
+            //dbg!(&msg);
             let result = match msg.kind {
-                MessageKind::Common(MessageCommon { from, media_kind: MediaKind::Document(doc), .. }) if doc.document.mime_type == Some(mime::APPLICATION_PDF) => {
+                MessageKind::Common(MessageCommon {
+                                        media_kind: MediaKind::Document(doc),
+                                        from: from_user,
+                                        ..
+                                    }) if doc.document.mime_type == Some(mime::APPLICATION_PDF) => {
                     info!("Received a PDF document: {:?}", doc);
 
-                    let user = match from {
-                        Some(user) =>  user.username.unwrap_or_else(|| user.id.to_string()),
+                    let user = match from_user {
+                        Some(user) =>  user.username.unwrap_or(user.id.to_string()),
                         None => String::from("very_weird_no_from_field_lmao"),
                     };
 
-                    let file_name = format!("{}_{}_{}.pdf",
+                    let file_name = format!("{}_{}_{}",
                         msg.date.format("%Y-%m-%d_%H-%M-%S").to_string(),
                         user,
-                        doc.document.file_name.as_deref().unwrap_or("no_name"));
+                        doc.document.file_name.as_deref().unwrap_or_else(|| "no_name"));
 
-                    let file_path = state.pdf_path.join(&file_name);
+                    let mut file_path = state2.pdf_path.join(&file_name);
+                    file_path.set_extension("pdf");
 
                     let mut file_stream = fs::File::create(&file_path).await.unwrap();
                     let file = bot.get_file(&doc.document.file.id).await?;
                     bot.download_file(&file.path, &mut file_stream).await?;
 
+                    bot.send_message(state2.admin_group.clone(),
+                                     format!("New file {} sent to print by {}", &file_name, &user)
+                    ).await?;
                     print(&file_path).await
                 }
                 _ => {
@@ -54,11 +67,16 @@ async fn main() {
             };
 
             match result {
-                Ok(()) => bot.send_message(msg.chat.id, "Please send a PDF document").await?,
-                Err(e) => bot.send_message(msg.chat.id, e).await?
+                Ok(out) => {
+                    debug!("{}", String::from_utf8(out.stdout).unwrap());
+                    bot.send_message(msg.chat.id, "File sent to the printer 🫡").await?
+                },
+                Err(e) => {
+                    bot.send_message(state2.admin_group.clone(), &e).await?;
+                    bot.send_message(msg.chat.id, "Something went wrong 😐").await?
+                }
             };
 
-            bot.send_dice(msg.chat.id).await?;
             Ok(())
         }
     }).await;
