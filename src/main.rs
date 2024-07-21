@@ -82,7 +82,9 @@ async fn main() {
     }).await;
 }
 
-async fn print(file_path: &PathBuf) -> Result<(), String> {
-    debug!("printing!!!");
-    Ok(())
+async fn print(file_path: &PathBuf) -> Result<Output, String> {
+    std::process::Command::new("lp")
+        .arg(file_path)
+        .output()
+        .map_err(|e| format!("Error executing lp: {}", e))
 }
