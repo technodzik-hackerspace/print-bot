@@ -15,37 +15,37 @@ struct State {
 
 #[derive(Debug)]
 enum PBError {
-    LpError(String),
-    PdfInfoError(String),
-    WrongFileError(String),
-    UnknownMessageKindError,
-    NoDocumentError,
-    RequestError(RequestError),
-    DownloadError(DownloadError),
+    Lp(String),
+    PdfInfo(String),
+    WrongFile(String),
+    UnknownMessageKind,
+    NoDocument,
+    Request(RequestError),
+    Download(DownloadError),
 }
 
 impl PBError {
     fn to_user_string(&self) -> String {
         match self {
-            PBError::LpError(_e) => "Printer is not responding. Sorry".to_string(),
-            PBError::PdfInfoError(e) => format!("Error getting the number of pages: {}", e),
-            PBError::WrongFileError(mime) => format!("Please send a PDF document, not a {} 😐", mime),
-            PBError::UnknownMessageKindError => "Something wrong with a printer. Sorry".to_string(),
-            PBError::NoDocumentError => "Please send a PDF document 😐".to_string(),
-            PBError::RequestError(_e) => "Failed to process your file. Try again or with another file".to_string(),
-            PBError::DownloadError(_e) => "Failed to download your file. Try again or with another file".to_string(),
+            PBError::Lp(_e) => "Printer is not responding. Sorry".to_string(),
+            PBError::PdfInfo(e) => format!("Error getting the number of pages: {}", e),
+            PBError::WrongFile(mime) => format!("Please send a PDF document, not a {} 😐", mime),
+            PBError::UnknownMessageKind => "Please send a PDF document 😐".to_string(),
+            PBError::NoDocument => "Please send a PDF document 😐".to_string(),
+            PBError::Request(_e) => "Failed to process your file. Try again or with another file".to_string(),
+            PBError::Download(_e) => "Failed to download your file. Try again or with another file".to_string(),
         }
     }
 
     fn to_admin_string(&self) -> String {
         match self {
-            PBError::LpError(e) => format!("Error printing the document: {}", e),
-            PBError::PdfInfoError(e) => format!("Error getting the number of pages: {}", e),
-            PBError::WrongFileError(mime) => format!("Please send a PDF document, not a {} 😐", mime),
-            PBError::UnknownMessageKindError => "Unknown message kind".to_string(),
-            PBError::NoDocumentError => "Please send a PDF document 😐".to_string(),
-            PBError::RequestError(e) => format!("Request error: {}", e),
-            PBError::DownloadError(e) => format!("Download error: {}", e),
+            PBError::Lp(e) => format!("Error printing the document: {}", e),
+            PBError::PdfInfo(e) => format!("Error getting the number of pages: {}", e),
+            PBError::WrongFile(mime) => format!("Please send a PDF document, not a {} 😐", mime),
+            PBError::UnknownMessageKind => "Unknown message kind".to_string(),
+            PBError::NoDocument => "Please send a PDF document 😐".to_string(),
+            PBError::Request(e) => format!("Request error: {}", e),
+            PBError::Download(e) => format!("Download error: {}", e),
         }
     }
 }
@@ -91,7 +91,7 @@ async fn main() {
 
                         let original_name = doc.document.file_name.as_deref().unwrap_or("no_name");
                         let file_name = format!("{}_{}_{}",
-                                                msg.date.format("%Y-%m-%d_%H-%M-%S").to_string(),
+                                                msg.date.format("%Y-%m-%d_%H-%M-%S"),
                                                 user,
                                                 original_name);
 
@@ -101,7 +101,7 @@ async fn main() {
                         let mut file_stream = fs::File::create(&file_path).await.unwrap();
 
                         let file = bot.get_file(&doc.document.file.id).await
-                            .map_err(|e| PBError::RequestError(e));
+                            .map_err(PBError::Request);
 
                         if let Err(e) = file {
                             break 'block Err(e);
@@ -110,7 +110,7 @@ async fn main() {
                         let file = file.unwrap();
 
                         if let Err(e) = bot.download_file(&file.path, &mut file_stream).await
-                            .map_err(|e| PBError::DownloadError(e)) {
+                            .map_err(PBError::Download) {
                             break 'block Err(e);
                         }
 
@@ -132,7 +132,7 @@ async fn main() {
                                         }) => {
                         user = get_user(from_user);
                         Err(
-                            PBError::WrongFileError(
+                            PBError::WrongFile(
                                 doc.document.mime_type
                                     .map(|mime| mime.to_string())
                                     .unwrap_or("unknown".to_string())
@@ -145,12 +145,12 @@ async fn main() {
                                         }) => {
                         user = get_user(from_user);
 
-                        Err(PBError::NoDocumentError)
+                        Err(PBError::NoDocument)
                     },
 
                     _ => {
                         user = "unknown user".to_string();
-                        Err(PBError::UnknownMessageKindError)
+                        Err(PBError::UnknownMessageKind)
                     }
                 }
             };
@@ -162,7 +162,7 @@ async fn main() {
                         1 => "1 page".to_string(),
                         n => format!("{} pages", n)
                     };
-                    let success_message = format!("{} of file {} sent to the printer 🫡", pages, pb_result.file_name);
+                    let success_message = format!("{} ({}) sent to the printer 🫡", pb_result.file_name, pages);
 
                     bot.send_message(msg.chat.id, &success_message).await?;
                     bot.send_message(
@@ -195,14 +195,14 @@ async fn print(file_path: &PathBuf) -> PBResult<Output> {
     std::process::Command::new("lp")
         .arg(file_path)
         .output()
-        .map_err(|e| PBError::LpError(e.to_string()))
+        .map_err(|e| PBError::Lp(e.to_string()))
 }
 
 async fn get_pages_number(file_path: &PathBuf) -> PBResult<u32> {
     std::process::Command::new("pdfinfo")
         .arg(file_path)
         .output()
-        .map_err(|e| PBError::PdfInfoError(e.to_string()))
+        .map_err(|e| PBError::PdfInfo(e.to_string()))
         .map(|output| {
             let output = String::from_utf8(output.stdout).unwrap();
             let pages = output.lines()
