@@ -36,6 +36,11 @@ in
       (get [ "hosts" name "sshKey" ])
     ];
 
+    # Extra root logins (optional, from secrets.nix). Added to whatever root
+    # already has in ~/.ssh/authorized_keys, not replacing it.
+    users.users.root.openssh.authorizedKeys.keys =
+      lib.optionals (get [ "hosts" name "rootKeys" ] != null) (get [ "hosts" name "rootKeys" ]);
+
     hardware.printers = {
       ensureDefaultPrinter = "td-printer";
       ensurePrinters = [{
